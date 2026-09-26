@@ -124,7 +124,6 @@ def buscar_dados_mercadolivre(url):
 
     return dados
 
-# ROTA EXATA QUE O admin.html CHAMA NO JAVASCRIPT:
 @app.route("/api/extrair-dados", methods=["POST"])
 def rota_extrair_dados():
     data = request.get_json() or {}
@@ -179,7 +178,7 @@ def index():
 @app.route("/comprar/<int:produto_id>")
 def comprar(produto_id):
     conn, is_pg = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
     
     if is_pg:
         cursor.execute("SELECT link_afiliado FROM produtos WHERE id = %s;", (produto_id,))
@@ -191,8 +190,9 @@ def comprar(produto_id):
     conn.close()
 
     if resultado:
-        link = resultado[0] if not isinstance(resultado, dict) else resultado["link_afiliado"]
-        return redirect(link)
+        link = resultado["link_afiliado"] if isinstance(resultado, dict) else resultado[0]
+        if link:
+            return redirect(link)
     return "Produto não encontrado", 404
 
 @app.route("/admin", methods=["GET", "POST"])
@@ -229,6 +229,7 @@ def admin():
         cursor.execute("SELECT * FROM produtos ORDER BY id DESC;")
         produtos = cursor.fetchall()
     else:
+        cursor = conn.cursor()
         cursor.execute("SELECT * FROM produtos ORDER BY id DESC;")
         produtos = cursor.fetchall()
         
@@ -236,11 +237,7 @@ def admin():
     conn.close()
     return render_template("admin.html", produtos=produtos)
 
-# ROTA DE EDIÇÃO COMPLETA:
 @app.route("/admin/editar/<int:produto_id>", methods=["GET", "POST"])
-@app.route("/admin/editar/<int:produto_id>/", methods=["GET", "POST"])
-@app.route("/editar/<int:produto_id>", methods=["GET", "POST"])
-@app.route("/editar/<int:produto_id>/", methods=["GET", "POST"])
 def editar_produto(produto_id):
     conn, is_pg = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
@@ -271,7 +268,6 @@ def editar_produto(produto_id):
         conn.close()
         return redirect(url_for("admin"))
 
-    # Buscar dados do produto para apresentar no formulário
     if is_pg:
         cursor.execute("SELECT * FROM produtos WHERE id = %s;", (produto_id,))
     else:
@@ -284,62 +280,58 @@ def editar_produto(produto_id):
     if not produto:
         return "Produto não encontrado", 404
 
-    prod_dict = dict(produto)
+    prod = dict(produto)
 
-    try:
-        return render_template("editar.html", produto=prod_dict, p=prod_dict)
-    except Exception:
-        return f"""
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Editar Produto</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-        </head>
-        <body class="bg-gray-50 p-6">
-            <div class="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow border">
-                <div class="flex justify-between items-center mb-6">
-                    <h1 class="text-xl font-bold text-gray-800">Editar Produto #{prod_dict.get('id')}</h1>
-                    <a href="/admin" class="text-blue-600 underline text-sm font-semibold">Voltar ao Painel</a>
-                </div>
-                <form method="POST" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-1">Título</label>
-                        <input type="text" name="titulo" value="{prod_dict.get('titulo', '')}" required class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-semibold text-gray-700 mb-1">Preço (R$)</label>
-                            <input type="text" name="preco" value="{prod_dict.get('preco', '')}" required class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-semibold text-gray-700 mb-1">Categoria</label>
-                            <input type="text" name="categoria" value="{prod_dict.get('categoria', '')}" class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-1">Link de Afiliado</label>
-                        <input type="url" name="link_afiliado" value="{prod_dict.get('link_afiliado', '')}" required class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-1">URL da Imagem</label>
-                        <input type="url" name="imagem_url" value="{prod_dict.get('imagem_url', '')}" class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-semibold text-gray-700 mb-1">Descrição</label>
-                        <textarea name="descricao" rows="3" class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">{prod_dict.get('descricao', '')}</textarea>
-                    </div>
-                    <div class="flex gap-3 pt-2">
-                        <button type="submit" class="flex-1 bg-blue-600 text-white font-bold py-2.5 rounded hover:bg-blue-700 shadow">Salvar Alterações</button>
-                        <a href="/admin" class="bg-gray-200 text-gray-700 font-bold py-2.5 px-5 rounded text-center">Cancelar</a>
-                    </div>
-                </form>
+    # Formulário completo estilizado em Tailwind para edição limpa
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Editar Produto</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-6">
+    <div class="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow border">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-xl font-bold text-gray-800">Editar Produto #{prod.get('id')}</h1>
+            <a href="/admin" class="text-blue-600 underline text-sm font-semibold">Voltar ao Painel</a>
+        </div>
+        <form method="POST" class="space-y-4">
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Título do Produto</label>
+                <input type="text" name="titulo" value="{prod.get('titulo', '')}" required class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
             </div>
-        </body>
-        </html>
-        """
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Preço (R$)</label>
+                    <input type="text" name="preco" value="{prod.get('preco', '')}" required class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Categoria</label>
+                    <input type="text" name="categoria" value="{prod.get('categoria', '')}" class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Link de Afiliado</label>
+                <input type="url" name="link_afiliado" value="{prod.get('link_afiliado', '')}" required class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">URL da Imagem</label>
+                <input type="url" name="imagem_url" value="{prod.get('imagem_url', '')}" class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">Descrição</label>
+                <textarea name="descricao" rows="3" class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">{prod.get('descricao', '')}</textarea>
+            </div>
+            <div class="flex gap-3 pt-3">
+                <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded shadow">Salvar Alterações</button>
+                <a href="/admin" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2.5 px-6 rounded text-center">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</body>
+</html>"""
 
 @app.route("/admin/excluir/<int:produto_id>", methods=["POST"])
 def excluir_produto(produto_id):
