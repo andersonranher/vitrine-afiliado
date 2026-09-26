@@ -58,7 +58,6 @@ def init_db():
         """)
         conn.commit()
 
-        # Ajuste de tipos e colunas adicionais para bancos existentes
         try:
             cursor.execute("ALTER TABLE produtos ALTER COLUMN vendas TYPE TEXT USING vendas::TEXT;")
             conn.commit()
@@ -200,11 +199,16 @@ def extrair_dados_ml(url_afiliado):
         if parcelas:
             dados["pagamento"] = parcelas.get_text(" ", strip=True)
 
-        # 6. Quantidade de Vendas
-        sub = soup.find(class_=lambda c: c and "subtitle" in c)
+        # 6. Quantidade de Vendas (Robusto para pegar +500 vendidos)
+        sub = soup.find(class_=lambda c: c and ("subtitle" in c or "header__subtitle" in c))
         if sub and "vendido" in sub.get_text().lower():
-            dados["vendas"] = sub.get_text(strip=True).split("|")[-1].strip()
-        else:
+            partes = sub.get_text(strip=True).split("|")
+            for parte in partes:
+                if "vendido" in parte.lower():
+                    dados["vendas"] = parte.strip()
+                    break
+
+        if not dados["vendas"]:
             m_vendas = re.search(r"(\+?\d+[\.\d]*\s*(mil)?\s*vendidos?)", soup.get_text(), re.IGNORECASE)
             if m_vendas:
                 dados["vendas"] = m_vendas.group(1).strip()
@@ -318,7 +322,6 @@ def admin():
         imagem_url = request.form.get("imagem_url", "").strip()
         file = request.files.get("imagem_upload")
         
-        # Converte upload direto em Base64 permanente salvo no PostgreSQL
         if file and file.filename != "" and allowed_file(file.filename):
             conteudo = file.read()
             ext = file.filename.rsplit(".", 1)[1].lower()
@@ -372,7 +375,6 @@ def editar_produto(produto_id):
         modelo = request.form.get("modelo", "").strip()
         vendas = request.form.get("vendas", "").strip()
 
-        # Mantém a imagem atual caso o usuário não envie uma nova
         imagem_atual = request.form.get("imagem_atual", "").strip()
         imagem_url = request.form.get("imagem_url", "").strip()
         
@@ -438,33 +440,36 @@ def excluir_produto(produto_id):
         conn.close()
     return redirect(url_for("admin"))
 
-# Função executada em segundo plano para não dar timeout (502) no Render
 def sincronizar_precos_background():
     conn, is_pg = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
     
     try:
-        cursor.execute("SELECT id, link_afiliado FROM produtos;")
+        cursor.execute("SELECT id, link_afiliado, vendas FROM produtos;")
         produtos = [dict(p) for p in cursor.fetchall()]
 
         for prod in produtos:
             link = prod.get("link_afiliado")
+            vendas_existente = prod.get("vendas") or ""
             if link:
                 try:
                     novos = extrair_dados_ml(link)
                     if novos.get("preco") and novos["preco"] != "0,00":
+                        # PROTEÇÃO: Só substitui vendas se o scraper tiver capturado uma nova string; senão preserva a existente!
+                        vendas_final = str(novos["vendas"]) if novos.get("vendas") else vendas_existente
+
                         if is_pg:
                             cursor.execute("""
                                 UPDATE produtos 
                                 SET preco=%s, preco_original=%s, desconto=%s, pagamento=%s, vendas=%s
                                 WHERE id=%s;
-                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
+                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], vendas_final, prod["id"]))
                         else:
                             cursor.execute("""
                                 UPDATE produtos 
                                 SET preco=?, preco_original=?, desconto=?, pagamento=?, vendas=?
                                 WHERE id=?;
-                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
+                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], vendas_final, prod["id"]))
                         conn.commit()
                 except Exception as item_err:
                     conn.rollback()
@@ -477,12 +482,9 @@ def sincronizar_precos_background():
 
 @app.route("/admin/atualizar-precos", methods=["POST"])
 def atualizar_precos():
-    # Inicia a sincronização numa thread separada
     t = threading.Thread(target=sincronizar_precos_background)
     t.daemon = True
     t.start()
-    
-    # Redireciona na mesma hora evitando que o Render exceda os 30s de timeout
     return redirect(url_for("admin"))
 
 if __name__ == "__main__":
