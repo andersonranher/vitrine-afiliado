@@ -13,7 +13,7 @@
       <a href="/admin" class="text-blue-600 font-bold hover:underline text-sm">&larr; Voltar ao Painel</a>
     </div>
 
-    <form method="POST" class="space-y-4">
+    <form method="POST" enctype="multipart/form-data" class="space-y-4">
       <div>
         <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Título do Produto</label>
         <input type="text" name="titulo" value="{{ p.titulo }}" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-medium">
@@ -44,13 +44,13 @@
           <input type="text" name="modelo" value="{{ p.modelo or '' }}" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
         </div>
         <div>
-          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Quantidade de Vendas</label>
-          <input type="number" name="vendas" value="{{ p.vendas or 0 }}" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Vendas (Ex: +500 vendidos)</label>
+          <input type="text" name="vendas" value="{{ p.vendas or '' }}" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-semibold text-orange-600">
         </div>
       </div>
 
       <div>
-        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Condições de Pagamento</label>
+        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Forma de Pagamento / Parcelas</label>
         <input type="text" name="pagamento" value="{{ p.pagamento or '' }}" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
       </div>
 
@@ -59,9 +59,18 @@
         <input type="url" name="link_afiliado" value="{{ p.link_afiliado }}" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
       </div>
 
-      <div>
-        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">URL da Imagem</label>
-        <input type="url" name="imagem_url" value="{{ p.imagem_url }}" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white text-sm">
+      <div class="border rounded-lg p-4 bg-gray-50 space-y-3">
+        <span class="block text-xs font-bold text-gray-700 uppercase">Alterar Foto:</span>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-gray-600 mb-1">URL da Imagem</label>
+            <input type="url" name="imagem_url" value="{{ p.imagem_url }}" class="w-full border p-2 rounded bg-white text-xs">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-600 mb-1">Ou Upload de Novo Ficheiro</label>
+            <input type="file" name="imagem_upload" accept="image/*" class="w-full text-xs text-gray-500 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700 file:font-semibold">
+          </div>
+        </div>
       </div>
 
       <div class="flex gap-4 pt-4">
