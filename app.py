@@ -44,6 +44,7 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 titulo TEXT NOT NULL,
                 preco TEXT NOT NULL,
+                preco_original TEXT DEFAULT '',
                 imagem_url TEXT NOT NULL,
                 link_afiliado TEXT NOT NULL,
                 categoria TEXT DEFAULT 'Geral',
@@ -58,34 +59,18 @@ def init_db():
         """)
         conn.commit()
 
-        # Ajusta colunas antigas para evitar recusa de dados
         try:
-            cursor.execute("ALTER TABLE produtos ALTER COLUMN vendas TYPE TEXT USING vendas::TEXT;")
+            cursor.execute("ALTER TABLE produtos ADD COLUMN preco_original TEXT DEFAULT '';")
             conn.commit()
         except Exception:
             conn.rollback()
-
-        colunas = [
-            ("desconto", "TEXT DEFAULT ''"),
-            ("pagamento", "TEXT DEFAULT ''"),
-            ("marca", "TEXT DEFAULT ''"),
-            ("modelo", "TEXT DEFAULT ''"),
-            ("vendas", "TEXT DEFAULT ''"),
-            ("descricao", "TEXT DEFAULT ''"),
-            ("especificacoes", "TEXT DEFAULT '{}'")
-        ]
-        for col, tipo in colunas:
-            try:
-                cursor.execute(f"ALTER TABLE produtos ADD COLUMN {col} {tipo};")
-                conn.commit()
-            except Exception:
-                conn.rollback()
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS produtos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 titulo TEXT NOT NULL,
                 preco TEXT NOT NULL,
+                preco_original TEXT DEFAULT '',
                 imagem_url TEXT NOT NULL,
                 link_afiliado TEXT NOT NULL,
                 categoria TEXT DEFAULT 'Geral',
@@ -99,6 +84,12 @@ def init_db():
             );
         """)
         conn.commit()
+
+        try:
+            cursor.execute("ALTER TABLE produtos ADD COLUMN preco_original TEXT DEFAULT '';")
+            conn.commit()
+        except Exception:
+            pass
 
     cursor.close()
     conn.close()
@@ -109,6 +100,7 @@ def extrair_dados_ml(url_afiliado):
     dados = {
         "titulo": "",
         "preco": "0,00",
+        "preco_original": "",
         "desconto": "",
         "pagamento": "Pix, Boleto e Cartão de Crédito",
         "marca": "",
@@ -139,7 +131,7 @@ def extrair_dados_ml(url_afiliado):
             if og_t and og_t.get("content"):
                 dados["titulo"] = og_t["content"].split(" | ")[0].strip()
 
-        # 2. Imagem em alta resolução (substitui miniaturas por original -O.jpg)
+        # 2. Imagem em alta resolução
         og_img = soup.find("meta", property="og:image")
         if og_img and og_img.get("content"):
             img_src = og_img["content"]
@@ -150,31 +142,48 @@ def extrair_dados_ml(url_afiliado):
             if galeria:
                 dados["imagem_url"] = galeria.get("data-zoom") or galeria.get("src") or ""
 
-        # 3. Preço com centavos exatos
-        container_preco = soup.find("span", class_="andes-money-amount ui-pdp-price__part") or soup
-        frac = container_preco.find("span", class_="andes-money-amount__fraction")
-        cents = container_preco.find("span", class_="andes-money-amount__cents")
-        if frac:
-            p_val = frac.get_text(strip=True)
-            if cents:
-                p_val += f",{cents.get_text(strip=True)}"
-            dados["preco"] = p_val
+        # 3. Desconto
+        disc = soup.find("span", class_=lambda c: c and "discount" in c)
+        if disc:
+            dados["desconto"] = disc.get_text(strip=True)
+
+        # 4. Preço Atual com Desconto vs. Preço Original (riscado)
+        precos_encontrados = []
+        for money_span in soup.find_all("span", class_=lambda c: c and "andes-money-amount" in c):
+            if "installment" in str(money_span.get("class", [])):
+                continue
+            frac = money_span.find("span", class_="andes-money-amount__fraction")
+            if frac:
+                cents = money_span.find("span", class_="andes-money-amount__cents")
+                val = frac.get_text(strip=True)
+                if cents:
+                    val += f",{cents.get_text(strip=True)}"
+                
+                is_strikethrough = money_span.find_parent("s") is not None or "strikethrough" in str(money_span.get("class", []))
+                precos_encontrados.append((val, is_strikethrough))
+
+        if precos_encontrados:
+            precos_atuais = [p[0] for p in precos_encontrados if not p[1]]
+            precos_anteriores = [p[0] for p in precos_encontrados if p[1]]
+
+            if precos_atuais:
+                dados["preco"] = precos_atuais[0]
+            else:
+                dados["preco"] = precos_encontrados[0][0]
+
+            if precos_anteriores and dados["desconto"]:
+                dados["preco_original"] = precos_anteriores[0]
         else:
             meta_p = soup.find("meta", property="product:price:amount") or soup.find("meta", property="og:price:amount")
             if meta_p and meta_p.get("content"):
                 dados["preco"] = meta_p["content"].replace(".", ",")
-
-        # 4. Desconto
-        disc = soup.find("span", class_=lambda c: c and "discount" in c)
-        if disc:
-            dados["desconto"] = disc.get_text(strip=True)
 
         # 5. Formas de Pagamento e Parcelas
         parcelas = soup.find(class_=lambda c: c and ("installments" in c or "payment-sub" in c))
         if parcelas:
             dados["pagamento"] = parcelas.get_text(" ", strip=True)
 
-        # 6. Quantidade de Vendas (+500 vendidos)
+        # 6. Quantidade de Vendas
         sub = soup.find(class_=lambda c: c and "subtitle" in c)
         if sub and "vendido" in sub.get_text().lower():
             dados["vendas"] = sub.get_text(strip=True).split("|")[-1].strip()
@@ -188,7 +197,7 @@ def extrair_dados_ml(url_afiliado):
         if crumbs and len(crumbs) > 1:
             dados["categoria"] = crumbs[-1].get_text(strip=True)
 
-        # 8. Marca e Modelo (Características do produto)
+        # 8. Marca e Modelo
         tabelas = soup.find_all(["table", "div"], class_=lambda c: c and "specs" in c) or soup.find_all("table")
         for tabela in tabelas:
             for tr in tabela.find_all("tr"):
@@ -278,10 +287,10 @@ def admin():
     cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
 
     if request.method == "POST":
-        # Garante a captura do link de afiliado quer venha do campo de busca ou do formulário
         link_afiliado = request.form.get("link_afiliado", "").strip() or request.form.get("link_busca", "").strip()
         titulo = request.form.get("titulo", "").strip()
         preco = request.form.get("preco", "").strip()
+        preco_original = request.form.get("preco_original", "").strip()
         categoria = request.form.get("categoria", "").strip() or "Geral"
         desconto = request.form.get("desconto", "").strip()
         pagamento = request.form.get("pagamento", "").strip()
@@ -303,15 +312,15 @@ def admin():
         if is_pg:
             cursor.execute("""
                 INSERT INTO produtos 
-                (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes, desconto, pagamento, marca, modelo)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-            """, (titulo, preco, imagem_url, link_afiliado, categoria, str(vendas), "", "{}", desconto, pagamento, marca, modelo))
+                (titulo, preco, preco_original, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes, desconto, pagamento, marca, modelo)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            """, (titulo, preco, preco_original, imagem_url, link_afiliado, categoria, str(vendas), "", "{}", desconto, pagamento, marca, modelo))
         else:
             cursor.execute("""
                 INSERT INTO produtos 
-                (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes, desconto, pagamento, marca, modelo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """, (titulo, preco, imagem_url, link_afiliado, categoria, str(vendas), "", "{}", desconto, pagamento, marca, modelo))
+                (titulo, preco, preco_original, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes, desconto, pagamento, marca, modelo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, (titulo, preco, preco_original, imagem_url, link_afiliado, categoria, str(vendas), "", "{}", desconto, pagamento, marca, modelo))
         
         conn.commit()
         cursor.close()
@@ -332,6 +341,7 @@ def editar_produto(produto_id):
     if request.method == "POST":
         titulo = request.form.get("titulo", "").strip()
         preco = request.form.get("preco", "").strip()
+        preco_original = request.form.get("preco_original", "").strip()
         categoria = request.form.get("categoria", "").strip() or "Geral"
         link_afiliado = request.form.get("link_afiliado", "").strip()
         desconto = request.form.get("desconto", "").strip()
@@ -340,27 +350,32 @@ def editar_produto(produto_id):
         modelo = request.form.get("modelo", "").strip()
         vendas = request.form.get("vendas", "").strip()
 
+        # Mantém a imagem atual se nenhuma nova for enviada
+        imagem_atual = request.form.get("imagem_atual", "").strip()
         imagem_url = request.form.get("imagem_url", "").strip()
+        
         file = request.files.get("imagem_upload")
         if file and file.filename != "" and allowed_file(file.filename):
             s_name = secure_filename(file.filename)
             file.save(os.path.join(app.config["UPLOAD_FOLDER"], s_name))
             imagem_url = f"/static/uploads/{s_name}"
+        elif not imagem_url:
+            imagem_url = imagem_atual
 
         if is_pg:
             cursor.execute("""
                 UPDATE produtos
-                SET titulo=%s, preco=%s, imagem_url=%s, link_afiliado=%s, categoria=%s,
+                SET titulo=%s, preco=%s, preco_original=%s, imagem_url=%s, link_afiliado=%s, categoria=%s,
                     desconto=%s, pagamento=%s, marca=%s, modelo=%s, vendas=%s
                 WHERE id=%s;
-            """, (titulo, preco, imagem_url, link_afiliado, categoria, desconto, pagamento, marca, modelo, str(vendas), produto_id))
+            """, (titulo, preco, preco_original, imagem_url, link_afiliado, categoria, desconto, pagamento, marca, modelo, str(vendas), produto_id))
         else:
             cursor.execute("""
                 UPDATE produtos
-                SET titulo=?, preco=?, imagem_url=?, link_afiliado=?, categoria=?,
+                SET titulo=?, preco=?, preco_original=?, imagem_url=?, link_afiliado=?, categoria=?,
                     desconto=?, pagamento=?, marca=?, modelo=?, vendas=?
                 WHERE id=?;
-            """, (titulo, preco, imagem_url, link_afiliado, categoria, desconto, pagamento, marca, modelo, str(vendas), produto_id))
+            """, (titulo, preco, preco_original, imagem_url, link_afiliado, categoria, desconto, pagamento, marca, modelo, str(vendas), produto_id))
         
         conn.commit()
         cursor.close()
@@ -384,13 +399,18 @@ def editar_produto(produto_id):
 def excluir_produto(produto_id):
     conn, is_pg = get_db_connection()
     cursor = conn.cursor()
-    if is_pg:
-        cursor.execute("DELETE FROM produtos WHERE id = %s;", (produto_id,))
-    else:
-        cursor.execute("DELETE FROM produtos WHERE id = ?;", (produto_id,))
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        if is_pg:
+            cursor.execute("DELETE FROM produtos WHERE id = %s;", (produto_id,))
+        else:
+            cursor.execute("DELETE FROM produtos WHERE id = ?;", (produto_id,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print("ERRO AO EXCLUIR:", e)
+    finally:
+        cursor.close()
+        conn.close()
     return redirect(url_for("admin"))
 
 @app.route("/admin/atualizar-precos", methods=["POST"])
@@ -409,15 +429,15 @@ def atualizar_precos():
                     if is_pg:
                         cursor.execute("""
                             UPDATE produtos 
-                            SET preco=%s, desconto=%s, pagamento=%s, vendas=%s
+                            SET preco=%s, preco_original=%s, desconto=%s, pagamento=%s, vendas=%s
                             WHERE id=%s;
-                        """, (novos["preco"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
+                        """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
                     else:
                         cursor.execute("""
                             UPDATE produtos 
-                            SET preco=?, desconto=?, pagamento=?, vendas=?
+                            SET preco=?, preco_original=?, desconto=?, pagamento=?, vendas=?
                             WHERE id=?;
-                        """, (novos["preco"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
+                        """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
                     conn.commit()
             except Exception as inner_err:
                 conn.rollback()
