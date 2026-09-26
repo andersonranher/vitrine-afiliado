@@ -6,105 +6,108 @@
   <title>Painel de Afiliado</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-50 p-6">
-  <div class="max-w-5xl mx-auto">
+<body class="bg-gray-100 p-6 font-sans">
+  <div class="max-w-6xl mx-auto">
     <div class="flex justify-between items-center mb-6">
-      <h1 class="text-2xl font-bold text-gray-800">Painel de Gerenciamento</h1>
-      <a href="/" target="_blank" class="text-blue-600 underline text-sm font-semibold">Visualizar Vitrine &rarr;</a>
+      <h1 class="text-2xl font-black text-gray-800 tracking-tight">Painel de Gerenciamento</h1>
+      <a href="/" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider py-2 px-4 rounded shadow">
+        Visualizar Vitrine &rarr;
+      </a>
     </div>
 
     <!-- Puxar Dados Automático -->
-    <div class="bg-blue-50 border border-blue-200 p-5 rounded-lg mb-6 shadow-sm">
-      <label class="block text-sm font-bold text-blue-900 mb-2">1. Cole o Link de Afiliado do Mercado Livre:</label>
+    <div class="bg-white border border-blue-200 p-5 rounded-xl mb-6 shadow-sm">
+      <label class="block text-sm font-bold text-gray-800 mb-2">1. Cole o Link de Afiliado (meli.la ou completo):</label>
       <div class="flex gap-2">
-        <input type="url" id="input_link_busca" placeholder="https://mercadolivre.com/sec/..." class="flex-1 border p-2.5 rounded bg-white">
-        <button type="button" onclick="puxarDados()" id="btn_puxar" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded shadow">
+        <input type="url" id="input_link_busca" placeholder="https://meli.la/..." class="flex-1 border p-3 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+        <button type="button" onclick="puxarDados()" id="btn_puxar" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-lg shadow transition duration-150">
           Puxar Dados Automático
         </button>
       </div>
-      <p id="msg_status" class="text-xs font-semibold mt-2 text-gray-500"></p>
+      <p id="msg_status" class="text-xs font-bold mt-2 text-gray-500"></p>
     </div>
 
     <!-- Formulário de Cadastro -->
-    <form method="POST" enctype="multipart/form-data" class="bg-white p-6 rounded-lg shadow border space-y-4 mb-8">
+    <form method="POST" class="bg-white p-6 rounded-xl shadow-sm border space-y-4 mb-8">
       <input type="hidden" name="link_afiliado" id="form_link_afiliado">
-      <input type="hidden" name="especificacoes" id="form_especificacoes" value="{}">
 
       <div>
-        <label class="block text-sm font-semibold text-gray-700 mb-1">Título do Produto</label>
-        <input type="text" name="titulo" id="form_titulo" required class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
+        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Título do Produto</label>
+        <input type="text" name="titulo" id="form_titulo" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-medium">
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
-          <label class="block text-sm font-semibold text-gray-700 mb-1">Preço (R$)</label>
-          <input type="text" name="preco" id="form_preco" required class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Preço com Centavos (R$)</label>
+          <input type="text" name="preco" id="form_preco" required placeholder="0,00" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-bold text-green-700">
         </div>
         <div>
-          <label class="block text-sm font-semibold text-gray-700 mb-1">Categoria</label>
-          <input type="text" name="categoria" id="form_categoria" class="w-full border p-2.5 rounded bg-gray-50 focus:bg-white">
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Desconto</label>
+          <input type="text" name="desconto" id="form_desconto" placeholder="Ex: 15% OFF" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Marca</label>
+          <input type="text" name="marca" id="form_marca" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Modelo</label>
+          <input type="text" name="modelo" id="form_modelo" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
         </div>
       </div>
 
-      <!-- Área de Imagem Dupla (Link ou Upload) -->
-      <div class="border rounded-lg p-4 bg-gray-50 space-y-3">
-        <span class="block text-sm font-bold text-gray-700">Foto do Produto (Escolha uma opção):</span>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-semibold text-gray-600 mb-1">Opção A: URL da Imagem da Web</label>
-            <input type="url" name="imagem_url" id="form_imagem" placeholder="https://..." class="w-full border p-2 rounded bg-white text-xs">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-600 mb-1">Opção B: Fazer Upload do Computador</label>
-            <input type="file" name="imagem_upload" accept="image/*" class="w-full text-xs text-gray-500 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700 file:font-semibold">
-          </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Categoria</label>
+          <input type="text" name="categoria" id="form_categoria" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Quantidade de Vendas</label>
+          <input type="number" name="vendas" id="form_vendas" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Forma de Pagamento / Parcelas</label>
+          <input type="text" name="pagamento" id="form_pagamento" placeholder="Ex: 10x de R$ 14,90 sem juros" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
         </div>
       </div>
 
       <div>
-        <label class="block text-sm font-semibold text-gray-700 mb-1">Descrição / Comentário Técnico</label>
-        <textarea name="descricao" id="form_descricao" rows="2" class="w-full border p-2.5 rounded"></textarea>
+        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">URL da Imagem</label>
+        <input type="url" name="imagem_url" id="form_imagem" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white text-sm">
       </div>
 
-      <button type="submit" class="w-full bg-green-600 text-white font-bold py-3 rounded hover:bg-green-700 shadow">
-        Cadastrar Produto
+      <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-black py-3 rounded-lg shadow uppercase tracking-wider transition">
+        Salvar Produto na Vitrine
       </button>
     </form>
 
     <!-- Lista com Ações de Editar / Excluir -->
-    <div class="flex justify-between items-center mb-3">
-      <h2 class="text-lg font-bold text-gray-800">Produtos no Catálogo</h2>
-      <form action="/admin/atualizar-precos" method="POST">
-        <button type="submit" class="bg-gray-800 hover:bg-black text-white text-xs font-bold py-2 px-3 rounded shadow">
-          🔄 Atualizar Preços Agora
-        </button>
-      </form>
-    </div>
-
-    <div class="bg-white rounded border overflow-x-auto shadow-sm">
+    <h2 class="text-xl font-bold text-gray-800 mb-3">Produtos Cadastrados ({{ produtos|length }})</h2>
+    <div class="bg-white rounded-xl border overflow-x-auto shadow-sm">
       <table class="w-full text-left text-sm">
-        <thead class="bg-gray-100 border-b">
+        <thead class="bg-gray-50 border-b text-gray-600 uppercase text-xs">
           <tr>
             <th class="p-3">Foto</th>
             <th class="p-3">Título</th>
             <th class="p-3">Categoria</th>
             <th class="p-3">Preço</th>
+            <th class="p-3">Vendas</th>
             <th class="p-3 text-center">Ações</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody class="divide-y">
           {% for p in produtos %}
-          <tr class="border-b hover:bg-gray-50">
+          <tr class="hover:bg-gray-50">
             <td class="p-3">
               <img src="{{ p.imagem_url }}" alt="" referrerpolicy="no-referrer" class="w-12 h-12 object-contain bg-white border rounded">
             </td>
             <td class="p-3 font-medium">{{ p.titulo }}</td>
             <td class="p-3"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded font-semibold">{{ p.categoria }}</span></td>
             <td class="p-3 font-bold text-green-700">R$ {{ p.preco }}</td>
+            <td class="p-3 text-gray-500 font-semibold">{{ p.vendas }} un.</td>
             <td class="p-3 text-center space-x-2">
-              <a href="/admin/editar/{{ p.id }}" class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded">Editar</a>
-              <form action="/admin/excluir/{{ p.id }}" method="POST" class="inline" onsubmit="return confirm('Deseja excluir este item da vitrine?');">
-                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded">Excluir</button>
+              <a href="/admin/editar/{{ p.id }}" class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded shadow">Editar</a>
+              <form action="/admin/excluir/{{ p.id }}" method="POST" class="inline" onsubmit="return confirm('Deseja excluir este item permanentemente?');">
+                <button type="submit" class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded shadow">Excluir</button>
               </form>
             </td>
           </tr>
@@ -122,8 +125,8 @@
 
       if (!link) { alert("Cole o link primeiro!"); return; }
 
-      status.innerText = "Consultando dados no Mercado Livre...";
-      status.className = "text-xs font-semibold mt-2 text-blue-600";
+      status.innerText = "Consultando Mercado Livre em tempo real...";
+      status.className = "text-xs font-bold mt-2 text-blue-600 animate-pulse";
       btn.disabled = true;
 
       try {
@@ -137,15 +140,19 @@
         document.getElementById('form_link_afiliado').value = link;
         document.getElementById('form_titulo').value = d.titulo || '';
         document.getElementById('form_preco').value = d.preco || '';
+        document.getElementById('form_desconto').value = d.desconto || '';
         document.getElementById('form_categoria').value = d.categoria || 'Geral';
+        document.getElementById('form_marca').value = d.marca || '';
+        document.getElementById('form_modelo').value = d.modelo || '';
+        document.getElementById('form_vendas').value = d.vendas || 0;
+        document.getElementById('form_pagamento').value = d.pagamento || '';
         document.getElementById('form_imagem').value = d.imagem_url || '';
-        document.getElementById('form_especificacoes').value = JSON.stringify(d.especificacoes || {});
 
-        status.innerText = "Dados preenchidos com sucesso!";
-        status.className = "text-xs font-semibold mt-2 text-green-600";
+        status.innerText = "✅ Dados extraídos com sucesso!";
+        status.className = "text-xs font-bold mt-2 text-green-600";
       } catch (err) {
-        status.innerText = "Erro ao buscar dados.";
-        status.className = "text-xs font-semibold mt-2 text-red-600";
+        status.innerText = "❌ Erro ao buscar dados. Verifique o link e tente novamente.";
+        status.className = "text-xs font-bold mt-2 text-red-600";
       } finally {
         btn.disabled = false;
       }
