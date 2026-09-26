@@ -10,6 +10,27 @@ from bs4 import BeautifulSoup
 from werkzeug.utils import secure_filename
 from flask import Flask, render_template, request, redirect, url_for, jsonify, abort
 
+def obter_vendas_ml(url):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        resposta = requests.get(url, headers=headers, timeout=10)
+        if resposta.status_code == 200:
+            sopa = BeautifulSoup(resposta.text, "html.parser")
+            
+            # Procura pelo texto indicativo de vendas no anúncio
+            elemento_vendas = sopa.find("span", class_="ui-pdp-subtitle")
+            if elemento_vendas:
+                texto = elemento_vendas.get_text()
+                # Exemplo de texto capturado: "Novo  |  +1000 vendidos"
+                numeros = re.findall(r"\d+", texto.replace(".", ""))
+                if numeros:
+                    return int(numeros[-1])
+    except Exception as e:
+        print(f"Erro ao capturar vendas: {e}")
+    return 0
+
 app = Flask(__name__)
 DB_NAME = "vitrine.db"
 UPLOAD_FOLDER = os.path.join('static', 'uploads')
