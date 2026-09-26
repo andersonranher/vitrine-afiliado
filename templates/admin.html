@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>Painel de Afiliado</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -36,7 +37,10 @@
 
     <!-- Formulário de Registo -->
     <form method="POST" enctype="multipart/form-data" class="bg-white p-6 rounded-xl shadow-sm border space-y-4 mb-8">
-      <input type="hidden" name="link_afiliado" id="form_link_afiliado">
+      <div>
+        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Link de Afiliado (Mercado Livre)</label>
+        <input type="url" name="link_afiliado" id="form_link_afiliado" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white text-xs font-mono text-blue-700">
+      </div>
 
       <div>
         <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Título do Produto</label>
@@ -77,7 +81,6 @@
         </div>
       </div>
 
-      <!-- Opção de Imagem: URL ou Upload -->
       <div class="border rounded-lg p-4 bg-gray-50 space-y-3">
         <span class="block text-xs font-bold text-gray-700 uppercase">Imagem do Produto (URL Automática ou Upload Manual):</span>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
