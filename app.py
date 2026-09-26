@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import base64
 import threading
 import requests
 from bs4 import BeautifulSoup
@@ -13,9 +14,6 @@ import sqlite3
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "chave_secreta_vitrine_afiliado_2026")
 
-UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif"}
 
 def allowed_file(filename):
@@ -319,10 +317,15 @@ def admin():
 
         imagem_url = request.form.get("imagem_url", "").strip()
         file = request.files.get("imagem_upload")
+        
+        # Converte upload direto em Base64 permanente salvo no PostgreSQL
         if file and file.filename != "" and allowed_file(file.filename):
-            s_name = secure_filename(file.filename)
-            file.save(os.path.join(app.config["UPLOAD_FOLDER"], s_name))
-            imagem_url = f"/static/uploads/{s_name}"
+            conteudo = file.read()
+            ext = file.filename.rsplit(".", 1)[1].lower()
+            if ext == "jpg":
+                ext = "jpeg"
+            b64_str = base64.b64encode(conteudo).decode("utf-8")
+            imagem_url = f"data:image/{ext};base64,{b64_str}"
 
         if not titulo or not preco:
             flash("Título e preço são obrigatórios!", "error")
@@ -375,9 +378,12 @@ def editar_produto(produto_id):
         
         file = request.files.get("imagem_upload")
         if file and file.filename != "" and allowed_file(file.filename):
-            s_name = secure_filename(file.filename)
-            file.save(os.path.join(app.config["UPLOAD_FOLDER"], s_name))
-            imagem_url = f"/static/uploads/{s_name}"
+            conteudo = file.read()
+            ext = file.filename.rsplit(".", 1)[1].lower()
+            if ext == "jpg":
+                ext = "jpeg"
+            b64_str = base64.b64encode(conteudo).decode("utf-8")
+            imagem_url = f"data:image/{ext};base64,{b64_str}"
         elif not imagem_url:
             imagem_url = imagem_atual
 
