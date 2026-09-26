@@ -3,7 +3,7 @@ import json
 import re
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import sqlite3
@@ -15,7 +15,6 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
     if DATABASE_URL:
-        # Corrige prefixo postgres:// caso o provedor retorne com essa sintaxe
         uri = DATABASE_URL
         if uri.startswith("postgres://"):
             uri = uri.replace("postgres://", "postgresql://", 1)
@@ -62,17 +61,17 @@ def init_db():
     cursor.close()
     conn.close()
 
-# Inicializa o banco ao subir a aplicação
 init_db()
 
 def buscar_dados_mercadolivre(url):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     
     dados = {
         "titulo": "",
-        "preco": "0.00",
+        "preco": "0,00",
         "imagem_url": "",
         "vendas": 0,
         "descricao": "",
@@ -80,47 +79,62 @@ def buscar_dados_mercadolivre(url):
     }
 
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
+        session = requests.Session()
+        resp = session.get(url, headers=headers, timeout=12, allow_redirects=True)
         if resp.status_code != 200:
             return dados
 
         soup = BeautifulSoup(resp.content, "html.parser")
 
         # Título
-        h1 = soup.find("h1", class_=lambda c: c and "title" in c)
+        h1 = soup.find("h1", class_=lambda c: c and ("title" in c or "header" in c))
         if h1:
             dados["titulo"] = h1.get_text(strip=True)
 
         # Preço
-        price_tag = soup.find("span", class_="andes-money-amount__fraction")
-        if price_tag:
-            dados["preco"] = price_tag.get_text(strip=True)
+        fraction = soup.find("span", class_="andes-money-amount__fraction")
+        cents = soup.find("span", class_="andes-money-amount__cents")
+        if fraction:
+            dados["preco"] = fraction.get_text(strip=True)
+            if cents:
+                dados["preco"] += f",{cents.get_text(strip=True)}"
 
-        # Imagem
-        img_tag = soup.find("img", class_=lambda c: c and "gallery" in c) or soup.find("img", {"decoding": "async"})
-        if img_tag:
-            dados["imagem_url"] = img_tag.get("src") or img_tag.get("data-src", "")
+        # Imagem principal
+        img = soup.find("img", class_=lambda c: c and ("gallery" in c or "zoom" in c)) or soup.find("img", {"decoding": "async"})
+        if img:
+            dados["imagem_url"] = img.get("src") or img.get("data-src") or ""
 
-        # Vendas (ex: "+1000 vendidos", "+50 mil vendidos")
-        subtitle = soup.find(class_=lambda c: c and "subtitle" in c)
-        if subtitle:
-            texto_vendas = subtitle.get_text()
-            match = re.search(r"(\d+)\s*(mil)?\s*vendidos?", texto_vendas, re.IGNORECASE)
-            if match:
-                qtd = int(match.group(1))
-                if match.group(2):
-                    qtd *= 1000
-                dados["vendas"] = qtd
+        # Vendas (+100 vendidos, +50 mil vendidos)
+        subtitle = soup.find(class_=lambda c: c and ("subtitle" in c or "sold" in c))
+        texto_pagina = subtitle.get_text() if subtitle else soup.get_text()
+        match = re.search(r"(\+?\d+)\s*(mil)?\s*vendidos?", texto_pagina, re.IGNORECASE)
+        if match:
+            num = int(re.sub(r"\D", "", match.group(1)))
+            if match.group(2):
+                num *= 1000
+            dados["vendas"] = num
 
-        # Descrição simples
-        desc_p = soup.find("p", class_=lambda c: c and "description" in c)
-        if desc_p:
-            dados["descricao"] = desc_p.get_text(strip=True)
+        # Descrição
+        desc = soup.find("p", class_=lambda c: c and "description" in c)
+        if desc:
+            dados["descricao"] = desc.get_text(strip=True)
 
     except Exception as e:
-        print(f"Erro ao capturar dados do ML: {e}")
+        print(f"Erro ao capturar dados: {e}")
 
     return dados
+
+# Rota para o botão "Puxar Dados Automático" (responde às chamadas AJAX do painel)
+@app.route("/buscar-dados", methods=["POST", "GET"])
+@app.route("/api/buscar-dados", methods=["POST", "GET"])
+@app.route("/api/buscar", methods=["POST", "GET"])
+def api_buscar():
+    url = request.args.get("url") or (request.json.get("url") if request.is_json else None) or request.form.get("url")
+    if not url:
+        return jsonify({"erro": "URL não fornecida"}), 400
+    
+    dados = buscar_dados_mercadolivre(url)
+    return jsonify(dados)
 
 @app.route("/")
 def index():
@@ -151,7 +165,6 @@ def index():
     cursor.close()
     conn.close()
 
-    # Formatar JSON de especificações se existir
     produtos_formatados = []
     for p in produtos:
         item = dict(p)
@@ -201,15 +214,22 @@ def admin():
             flash("Informe o link de afiliado!", "error")
             return redirect(url_for("admin"))
 
-        dados = buscar_dados_mercadolivre(link_produto)
-
-        # Campos manuais sobrescrevem o scraper se preenchidos
-        titulo = request.form.get("titulo", "").strip() or dados["titulo"] or "Produto Recomendado"
-        preco = request.form.get("preco", "").strip() or dados["preco"] or "0,00"
-        imagem_url = request.form.get("imagem_url", "").strip() or dados["imagem_url"]
+        titulo = request.form.get("titulo", "").strip()
+        preco = request.form.get("preco", "").strip()
+        imagem_url = request.form.get("imagem_url", "").strip()
         vendas = request.form.get("vendas")
-        vendas = int(vendas) if vendas and vendas.isdigit() else dados["vendas"]
-        descricao = request.form.get("descricao", "").strip() or dados["descricao"]
+        descricao = request.form.get("descricao", "").strip()
+
+        # Se não foram preenchidos manualmente pelo botão automático, busca agora
+        if not (titulo and preco and imagem_url):
+            dados = buscar_dados_mercadolivre(link_produto)
+            titulo = titulo or dados["titulo"] or "Produto Recomendado"
+            preco = preco or dados["preco"] or "0,00"
+            imagem_url = imagem_url or dados["imagem_url"]
+            descricao = descricao or dados["descricao"]
+            vendas = int(vendas) if vendas and vendas.isdigit() else dados["vendas"]
+        else:
+            vendas = int(vendas) if vendas and vendas.isdigit() else 0
 
         conn, is_pg = get_db_connection()
         cursor = conn.cursor()
@@ -218,12 +238,12 @@ def admin():
             cursor.execute("""
                 INSERT INTO produtos (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
-            """, (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, json.dumps(dados["especificacoes"])))
+            """, (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, json.dumps({})))
         else:
             cursor.execute("""
                 INSERT INTO produtos (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-            """, (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, json.dumps(dados["especificacoes"])))
+            """, (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, json.dumps({})))
 
         conn.commit()
         cursor.close()
@@ -232,7 +252,6 @@ def admin():
         flash("Produto cadastrado com sucesso!", "success")
         return redirect(url_for("admin"))
 
-    # Listar produtos já cadastrados no painel
     conn, is_pg = get_db_connection()
     if is_pg:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
