@@ -3,3 +3,4 @@ requests
 beautifulsoup4
 schedule
 gunicorn
+psycopg2-binary
