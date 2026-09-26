@@ -10,9 +10,16 @@
   <div class="max-w-6xl mx-auto">
     <div class="flex justify-between items-center mb-6">
       <h1 class="text-2xl font-black text-gray-800 tracking-tight">Painel de Gerenciamento</h1>
-      <a href="/" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider py-2 px-4 rounded shadow">
-        Visualizar Vitrine &rarr;
-      </a>
+      <div class="flex gap-3">
+        <form action="/admin/atualizar-precos" method="POST">
+          <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase tracking-wider py-2 px-4 rounded shadow">
+            🔄 Atualizar Preços de Todos
+          </button>
+        </form>
+        <a href="/" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider py-2 px-4 rounded shadow">
+          Visualizar Vitrine &rarr;
+        </a>
+      </div>
     </div>
 
     <!-- Puxar Dados Automático -->
@@ -20,15 +27,15 @@
       <label class="block text-sm font-bold text-gray-800 mb-2">1. Cole o Link de Afiliado (meli.la ou completo):</label>
       <div class="flex gap-2">
         <input type="url" id="input_link_busca" placeholder="https://meli.la/..." class="flex-1 border p-3 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-        <button type="button" onclick="puxarDados()" id="btn_puxar" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-lg shadow transition duration-150">
+        <button type="button" onclick="puxarDados()" id="btn_puxar" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-lg shadow transition">
           Puxar Dados Automático
         </button>
       </div>
       <p id="msg_status" class="text-xs font-bold mt-2 text-gray-500"></p>
     </div>
 
-    <!-- Formulário de Cadastro -->
-    <form method="POST" class="bg-white p-6 rounded-xl shadow-sm border space-y-4 mb-8">
+    <!-- Formulário de Registo -->
+    <form method="POST" enctype="multipart/form-data" class="bg-white p-6 rounded-xl shadow-sm border space-y-4 mb-8">
       <input type="hidden" name="link_afiliado" id="form_link_afiliado">
 
       <div>
@@ -61,18 +68,28 @@
           <input type="text" name="categoria" id="form_categoria" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
         </div>
         <div>
-          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Quantidade de Vendas</label>
-          <input type="number" name="vendas" id="form_vendas" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Vendas (Ex: +500 vendidos)</label>
+          <input type="text" name="vendas" id="form_vendas" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-semibold text-orange-600">
         </div>
         <div>
-          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Forma de Pagamento / Parcelas</label>
-          <input type="text" name="pagamento" id="form_pagamento" placeholder="Ex: 10x de R$ 14,90 sem juros" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Pagamento / Parcelas</label>
+          <input type="text" name="pagamento" id="form_pagamento" placeholder="Ex: 6x de R$ 33,31 sem juros" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
         </div>
       </div>
 
-      <div>
-        <label class="block text-xs font-bold text-gray-700 uppercase mb-1">URL da Imagem</label>
-        <input type="url" name="imagem_url" id="form_imagem" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white text-sm">
+      <!-- Opção de Imagem: URL ou Upload -->
+      <div class="border rounded-lg p-4 bg-gray-50 space-y-3">
+        <span class="block text-xs font-bold text-gray-700 uppercase">Imagem do Produto (URL Automática ou Upload Manual):</span>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-gray-600 mb-1">Opção A: URL da Imagem</label>
+            <input type="url" name="imagem_url" id="form_imagem" class="w-full border p-2 rounded bg-white text-xs">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-600 mb-1">Opção B: Upload do Ficheiro</label>
+            <input type="file" name="imagem_upload" accept="image/*" class="w-full text-xs text-gray-500 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700 file:font-semibold">
+          </div>
+        </div>
       </div>
 
       <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-black py-3 rounded-lg shadow uppercase tracking-wider transition">
@@ -80,7 +97,7 @@
       </button>
     </form>
 
-    <!-- Lista com Ações de Editar / Excluir -->
+    <!-- Lista de Produtos -->
     <h2 class="text-xl font-bold text-gray-800 mb-3">Produtos Cadastrados ({{ produtos|length }})</h2>
     <div class="bg-white rounded-xl border overflow-x-auto shadow-sm">
       <table class="w-full text-left text-sm">
@@ -88,7 +105,7 @@
           <tr>
             <th class="p-3">Foto</th>
             <th class="p-3">Título</th>
-            <th class="p-3">Categoria</th>
+            <th class="p-3">Marca / Modelo</th>
             <th class="p-3">Preço</th>
             <th class="p-3">Vendas</th>
             <th class="p-3 text-center">Ações</th>
@@ -101,9 +118,9 @@
               <img src="{{ p.imagem_url }}" alt="" referrerpolicy="no-referrer" class="w-12 h-12 object-contain bg-white border rounded">
             </td>
             <td class="p-3 font-medium">{{ p.titulo }}</td>
-            <td class="p-3"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded font-semibold">{{ p.categoria }}</span></td>
+            <td class="p-3 text-xs text-gray-500">{{ p.marca or '-' }} / {{ p.modelo or '-' }}</td>
             <td class="p-3 font-bold text-green-700">R$ {{ p.preco }}</td>
-            <td class="p-3 text-gray-500 font-semibold">{{ p.vendas }} un.</td>
+            <td class="p-3 text-orange-600 font-semibold text-xs">{{ p.vendas or '-' }}</td>
             <td class="p-3 text-center space-x-2">
               <a href="/admin/editar/{{ p.id }}" class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded shadow">Editar</a>
               <form action="/admin/excluir/{{ p.id }}" method="POST" class="inline" onsubmit="return confirm('Deseja excluir este item permanentemente?');">
@@ -125,7 +142,7 @@
 
       if (!link) { alert("Cole o link primeiro!"); return; }
 
-      status.innerText = "Consultando Mercado Livre em tempo real...";
+      status.innerText = "A extrair dados do Mercado Livre...";
       status.className = "text-xs font-bold mt-2 text-blue-600 animate-pulse";
       btn.disabled = true;
 
@@ -144,14 +161,14 @@
         document.getElementById('form_categoria').value = d.categoria || 'Geral';
         document.getElementById('form_marca').value = d.marca || '';
         document.getElementById('form_modelo').value = d.modelo || '';
-        document.getElementById('form_vendas').value = d.vendas || 0;
+        document.getElementById('form_vendas').value = d.vendas || '';
         document.getElementById('form_pagamento').value = d.pagamento || '';
         document.getElementById('form_imagem').value = d.imagem_url || '';
 
         status.innerText = "✅ Dados extraídos com sucesso!";
         status.className = "text-xs font-bold mt-2 text-green-600";
       } catch (err) {
-        status.innerText = "❌ Erro ao buscar dados. Verifique o link e tente novamente.";
+        status.innerText = "❌ Erro ao buscar dados. Tente novamente.";
         status.className = "text-xs font-bold mt-2 text-red-600";
       } finally {
         btn.disabled = false;
