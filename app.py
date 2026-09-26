@@ -10,9 +10,8 @@ from psycopg2.extras import RealDictCursor
 import sqlite3
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "chave_secreta_vitrine_afiliado")
+app.secret_key = os.environ.get("SECRET_KEY", "chave_secreta_vitrine_afiliado_2026")
 
-# Configuração de uploads locais
 UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
@@ -47,7 +46,7 @@ def init_db():
                 preco TEXT NOT NULL,
                 imagem_url TEXT NOT NULL,
                 link_afiliado TEXT NOT NULL,
-                categoria TEXT,
+                categoria TEXT DEFAULT 'Geral',
                 vendas TEXT DEFAULT '',
                 descricao TEXT DEFAULT '',
                 especificacoes TEXT DEFAULT '{}',
@@ -57,6 +56,30 @@ def init_db():
                 modelo TEXT DEFAULT ''
             );
         """)
+        conn.commit()
+
+        # Ajusta colunas antigas para evitar recusa de dados
+        try:
+            cursor.execute("ALTER TABLE produtos ALTER COLUMN vendas TYPE TEXT USING vendas::TEXT;")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        colunas = [
+            ("desconto", "TEXT DEFAULT ''"),
+            ("pagamento", "TEXT DEFAULT ''"),
+            ("marca", "TEXT DEFAULT ''"),
+            ("modelo", "TEXT DEFAULT ''"),
+            ("vendas", "TEXT DEFAULT ''"),
+            ("descricao", "TEXT DEFAULT ''"),
+            ("especificacoes", "TEXT DEFAULT '{}'")
+        ]
+        for col, tipo in colunas:
+            try:
+                cursor.execute(f"ALTER TABLE produtos ADD COLUMN {col} {tipo};")
+                conn.commit()
+            except Exception:
+                conn.rollback()
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS produtos (
@@ -65,7 +88,7 @@ def init_db():
                 preco TEXT NOT NULL,
                 imagem_url TEXT NOT NULL,
                 link_afiliado TEXT NOT NULL,
-                categoria TEXT,
+                categoria TEXT DEFAULT 'Geral',
                 vendas TEXT DEFAULT '',
                 descricao TEXT DEFAULT '',
                 especificacoes TEXT DEFAULT '{}',
@@ -75,24 +98,8 @@ def init_db():
                 modelo TEXT DEFAULT ''
             );
         """)
-    
-    colunas = [
-        ("desconto", "TEXT DEFAULT ''"),
-        ("pagamento", "TEXT DEFAULT ''"),
-        ("marca", "TEXT DEFAULT ''"),
-        ("modelo", "TEXT DEFAULT ''"),
-        ("vendas", "TEXT DEFAULT ''"),
-        ("descricao", "TEXT DEFAULT ''"),
-        ("especificacoes", "TEXT DEFAULT '{}'")
-    ]
-    for col, tipo in colunas:
-        try:
-            cursor.execute(f"ALTER TABLE produtos ADD COLUMN {col} {tipo};")
-            conn.commit()
-        except Exception:
-            conn.rollback()
+        conn.commit()
 
-    conn.commit()
     cursor.close()
     conn.close()
 
@@ -120,7 +127,7 @@ def extrair_dados_ml(url_afiliado):
 
     try:
         session = requests.Session()
-        res = session.get(url_afiliado, headers=headers, allow_redirects=True, timeout=12)
+        res = session.get(url_afiliado, headers=headers, allow_redirects=True, timeout=15)
         soup = BeautifulSoup(res.content, "html.parser")
 
         # 1. Título
@@ -132,19 +139,18 @@ def extrair_dados_ml(url_afiliado):
             if og_t and og_t.get("content"):
                 dados["titulo"] = og_t["content"].split(" | ")[0].strip()
 
-        # 2. Imagem
+        # 2. Imagem em alta resolução (substitui miniaturas por original -O.jpg)
         og_img = soup.find("meta", property="og:image")
         if og_img and og_img.get("content"):
             img_src = og_img["content"]
-            img_src = re.sub(r"-I\.jpg", "-O.jpg", img_src)
-            img_src = re.sub(r"-V\.jpg", "-O.jpg", img_src)
+            img_src = re.sub(r"-[IV]\.jpg", "-O.jpg", img_src)
             dados["imagem_url"] = img_src
         else:
             galeria = soup.find("img", class_=lambda c: c and "gallery" in c)
             if galeria:
                 dados["imagem_url"] = galeria.get("data-zoom") or galeria.get("src") or ""
 
-        # 3. Preço com centavos
+        # 3. Preço com centavos exatos
         container_preco = soup.find("span", class_="andes-money-amount ui-pdp-price__part") or soup
         frac = container_preco.find("span", class_="andes-money-amount__fraction")
         cents = container_preco.find("span", class_="andes-money-amount__cents")
@@ -163,26 +169,26 @@ def extrair_dados_ml(url_afiliado):
         if disc:
             dados["desconto"] = disc.get_text(strip=True)
 
-        # 5. Formas de Pagamento
+        # 5. Formas de Pagamento e Parcelas
         parcelas = soup.find(class_=lambda c: c and ("installments" in c or "payment-sub" in c))
         if parcelas:
             dados["pagamento"] = parcelas.get_text(" ", strip=True)
 
-        # 6. Quantidade de Vendas
-        m_vendas = re.search(r"(\+?\d+[\.\d]*\s*(mil)?\s*vendidos?)", soup.get_text(), re.IGNORECASE)
-        if m_vendas:
-            dados["vendas"] = m_vendas.group(1).strip()
+        # 6. Quantidade de Vendas (+500 vendidos)
+        sub = soup.find(class_=lambda c: c and "subtitle" in c)
+        if sub and "vendido" in sub.get_text().lower():
+            dados["vendas"] = sub.get_text(strip=True).split("|")[-1].strip()
         else:
-            sub = soup.find(class_=lambda c: c and "subtitle" in c)
-            if sub and "vendido" in sub.get_text().lower():
-                dados["vendas"] = sub.get_text(strip=True).split("|")[-1].strip()
+            m_vendas = re.search(r"(\+?\d+[\.\d]*\s*(mil)?\s*vendidos?)", soup.get_text(), re.IGNORECASE)
+            if m_vendas:
+                dados["vendas"] = m_vendas.group(1).strip()
 
         # 7. Categoria
         crumbs = soup.find_all("a", class_=lambda c: c and "breadcrumb" in c)
         if crumbs and len(crumbs) > 1:
             dados["categoria"] = crumbs[-1].get_text(strip=True)
 
-        # 8. Marca e Modelo
+        # 8. Marca e Modelo (Características do produto)
         tabelas = soup.find_all(["table", "div"], class_=lambda c: c and "specs" in c) or soup.find_all("table")
         for tabela in tabelas:
             for tr in tabela.find_all("tr"):
@@ -196,8 +202,16 @@ def extrair_dados_ml(url_afiliado):
                     elif "modelo" in rotulo and not dados["modelo"]:
                         dados["modelo"] = conteudo
 
+        if not dados["marca"] or not dados["modelo"]:
+            for item in soup.find_all(class_=lambda c: c and "item-property" in c):
+                t_item = item.get_text(strip=True).lower()
+                if "marca:" in t_item and not dados["marca"]:
+                    dados["marca"] = t_item.split("marca:")[-1].strip()
+                elif "modelo:" in t_item and not dados["modelo"]:
+                    dados["modelo"] = t_item.split("modelo:")[-1].strip()
+
     except Exception as e:
-        print(f"Erro ao extrair dados do Mercado Livre: {e}")
+        print(f"Erro no scraper: {e}")
 
     return dados
 
@@ -264,7 +278,8 @@ def admin():
     cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
 
     if request.method == "POST":
-        link_afiliado = request.form.get("link_afiliado", "").strip()
+        # Garante a captura do link de afiliado quer venha do campo de busca ou do formulário
+        link_afiliado = request.form.get("link_afiliado", "").strip() or request.form.get("link_busca", "").strip()
         titulo = request.form.get("titulo", "").strip()
         preco = request.form.get("preco", "").strip()
         categoria = request.form.get("categoria", "").strip() or "Geral"
@@ -281,27 +296,26 @@ def admin():
             file.save(os.path.join(app.config["UPLOAD_FOLDER"], s_name))
             imagem_url = f"/static/uploads/{s_name}"
 
-        try:
-            if is_pg:
-                cursor.execute("""
-                    INSERT INTO produtos 
-                    (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes, desconto, pagamento, marca, modelo)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-                """, (titulo, preco, imagem_url, link_afiliado, categoria, vendas, "", "{}", desconto, pagamento, marca, modelo))
-            else:
-                cursor.execute("""
-                    INSERT INTO produtos 
-                    (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes, desconto, pagamento, marca, modelo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """, (titulo, preco, imagem_url, link_afiliado, categoria, vendas, "", "{}", desconto, pagamento, marca, modelo))
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            print("Erro ao inserir produto:", e)
-        finally:
-            cursor.close()
-            conn.close()
+        if not titulo or not preco:
+            flash("Título e preço são obrigatórios!", "error")
+            return redirect(url_for("admin"))
 
+        if is_pg:
+            cursor.execute("""
+                INSERT INTO produtos 
+                (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes, desconto, pagamento, marca, modelo)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            """, (titulo, preco, imagem_url, link_afiliado, categoria, str(vendas), "", "{}", desconto, pagamento, marca, modelo))
+        else:
+            cursor.execute("""
+                INSERT INTO produtos 
+                (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes, desconto, pagamento, marca, modelo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, (titulo, preco, imagem_url, link_afiliado, categoria, str(vendas), "", "{}", desconto, pagamento, marca, modelo))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
         return redirect(url_for("admin"))
 
     cursor.execute("SELECT * FROM produtos ORDER BY id DESC;")
@@ -333,29 +347,24 @@ def editar_produto(produto_id):
             file.save(os.path.join(app.config["UPLOAD_FOLDER"], s_name))
             imagem_url = f"/static/uploads/{s_name}"
 
-        try:
-            if is_pg:
-                cursor.execute("""
-                    UPDATE produtos
-                    SET titulo=%s, preco=%s, imagem_url=%s, link_afiliado=%s, categoria=%s,
-                        desconto=%s, pagamento=%s, marca=%s, modelo=%s, vendas=%s
-                    WHERE id=%s;
-                """, (titulo, preco, imagem_url, link_afiliado, categoria, desconto, pagamento, marca, modelo, vendas, produto_id))
-            else:
-                cursor.execute("""
-                    UPDATE produtos
-                    SET titulo=?, preco=?, imagem_url=?, link_afiliado=?, categoria=?,
-                        desconto=?, pagamento=?, marca=?, modelo=?, vendas=?
-                    WHERE id=?;
-                """, (titulo, preco, imagem_url, link_afiliado, categoria, desconto, pagamento, marca, modelo, vendas, produto_id))
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            print("Erro ao atualizar produto:", e)
-        finally:
-            cursor.close()
-            conn.close()
-
+        if is_pg:
+            cursor.execute("""
+                UPDATE produtos
+                SET titulo=%s, preco=%s, imagem_url=%s, link_afiliado=%s, categoria=%s,
+                    desconto=%s, pagamento=%s, marca=%s, modelo=%s, vendas=%s
+                WHERE id=%s;
+            """, (titulo, preco, imagem_url, link_afiliado, categoria, desconto, pagamento, marca, modelo, str(vendas), produto_id))
+        else:
+            cursor.execute("""
+                UPDATE produtos
+                SET titulo=?, preco=?, imagem_url=?, link_afiliado=?, categoria=?,
+                    desconto=?, pagamento=?, marca=?, modelo=?, vendas=?
+                WHERE id=?;
+            """, (titulo, preco, imagem_url, link_afiliado, categoria, desconto, pagamento, marca, modelo, str(vendas), produto_id))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
         return redirect(url_for("admin"))
 
     if is_pg:
@@ -375,18 +384,13 @@ def editar_produto(produto_id):
 def excluir_produto(produto_id):
     conn, is_pg = get_db_connection()
     cursor = conn.cursor()
-    try:
-        if is_pg:
-            cursor.execute("DELETE FROM produtos WHERE id = %s;", (produto_id,))
-        else:
-            cursor.execute("DELETE FROM produtos WHERE id = ?;", (produto_id,))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        print("Erro ao excluir produto:", e)
-    finally:
-        cursor.close()
-        conn.close()
+    if is_pg:
+        cursor.execute("DELETE FROM produtos WHERE id = %s;", (produto_id,))
+    else:
+        cursor.execute("DELETE FROM produtos WHERE id = ?;", (produto_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
     return redirect(url_for("admin"))
 
 @app.route("/admin/atualizar-precos", methods=["POST"])
@@ -394,35 +398,33 @@ def atualizar_precos():
     conn, is_pg = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
     
-    try:
-        cursor.execute("SELECT id, link_afiliado FROM produtos;")
-        produtos = [dict(p) for p in cursor.fetchall()]
+    cursor.execute("SELECT id, link_afiliado FROM produtos;")
+    produtos = [dict(p) for p in cursor.fetchall()]
 
-        for prod in produtos:
-            if prod.get("link_afiliado"):
-                try:
-                    novos = extrair_dados_ml(prod["link_afiliado"])
-                    if novos.get("preco") and novos["preco"] != "0,00":
-                        if is_pg:
-                            cursor.execute("""
-                                UPDATE produtos 
-                                SET preco=%s, desconto=%s, pagamento=%s, vendas=%s
-                                WHERE id=%s;
-                            """, (novos["preco"], novos["desconto"], novos["pagamento"], novos["vendas"], prod["id"]))
-                        else:
-                            cursor.execute("""
-                                UPDATE produtos 
-                                SET preco=?, desconto=?, pagamento=?, vendas=?
-                                WHERE id=?;
-                            """, (novos["preco"], novos["desconto"], novos["pagamento"], novos["vendas"], prod["id"]))
-                        conn.commit()
-                except Exception as inner_err:
-                    conn.rollback()
-                    print(f"Erro ao atualizar produto #{prod['id']}: {inner_err}")
-    finally:
-        cursor.close()
-        conn.close()
+    for prod in produtos:
+        if prod.get("link_afiliado"):
+            try:
+                novos = extrair_dados_ml(prod["link_afiliado"])
+                if novos.get("preco") and novos["preco"] != "0,00":
+                    if is_pg:
+                        cursor.execute("""
+                            UPDATE produtos 
+                            SET preco=%s, desconto=%s, pagamento=%s, vendas=%s
+                            WHERE id=%s;
+                        """, (novos["preco"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
+                    else:
+                        cursor.execute("""
+                            UPDATE produtos 
+                            SET preco=?, desconto=?, pagamento=?, vendas=?
+                            WHERE id=?;
+                        """, (novos["preco"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
+                    conn.commit()
+            except Exception as inner_err:
+                conn.rollback()
+                print(f"Erro item #{prod['id']}: {inner_err}")
 
+    cursor.close()
+    conn.close()
     return redirect(url_for("admin"))
 
 if __name__ == "__main__":
