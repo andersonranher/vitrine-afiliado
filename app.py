@@ -64,76 +64,87 @@ def init_db():
 init_db()
 
 def buscar_dados_mercadolivre(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
-    }
-    
     dados = {
         "titulo": "",
-        "preco": "0,00",
+        "preco": "",
         "imagem_url": "",
         "vendas": 0,
         "descricao": "",
         "especificacoes": {}
     }
 
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Upgrade-Insecure-Requests": "1"
+    }
+
     try:
         session = requests.Session()
-        resp = session.get(url, headers=headers, timeout=12, allow_redirects=True)
-        if resp.status_code != 200:
-            return dados
+        # Se for link do encurtador meli.la, resolve o redirecionamento
+        res = session.get(url, headers=headers, allow_redirects=True, timeout=12)
+        url_final = res.url
+        
+        soup = BeautifulSoup(res.content, "html.parser")
 
-        soup = BeautifulSoup(resp.content, "html.parser")
-
-        # Título
+        # 1. Título
         h1 = soup.find("h1", class_=lambda c: c and ("title" in c or "header" in c))
         if h1:
             dados["titulo"] = h1.get_text(strip=True)
+        else:
+            meta_title = soup.find("meta", property="og:title")
+            if meta_title and meta_title.get("content"):
+                dados["titulo"] = meta_title["content"].split(" | ")[0].strip()
 
-        # Preço
+        # 2. Imagem
+        meta_img = soup.find("meta", property="og:image")
+        if meta_img and meta_img.get("content"):
+            dados["imagem_url"] = meta_img["content"]
+        else:
+            img = soup.find("img", class_=lambda c: c and "gallery" in c)
+            if img:
+                dados["imagem_url"] = img.get("src") or img.get("data-src") or ""
+
+        # 3. Preço
         fraction = soup.find("span", class_="andes-money-amount__fraction")
         cents = soup.find("span", class_="andes-money-amount__cents")
         if fraction:
             dados["preco"] = fraction.get_text(strip=True)
             if cents:
                 dados["preco"] += f",{cents.get_text(strip=True)}"
+        else:
+            meta_price = soup.find("meta", property="product:price:amount") or soup.find("meta", property="og:price:amount")
+            if meta_price and meta_price.get("content"):
+                dados["preco"] = meta_price["content"].replace(".", ",")
 
-        # Imagem principal
-        img = soup.find("img", class_=lambda c: c and ("gallery" in c or "zoom" in c)) or soup.find("img", {"decoding": "async"})
-        if img:
-            dados["imagem_url"] = img.get("src") or img.get("data-src") or ""
-
-        # Vendas (+100 vendidos, +50 mil vendidos)
-        subtitle = soup.find(class_=lambda c: c and ("subtitle" in c or "sold" in c))
-        texto_pagina = subtitle.get_text() if subtitle else soup.get_text()
-        match = re.search(r"(\+?\d+)\s*(mil)?\s*vendidos?", texto_pagina, re.IGNORECASE)
-        if match:
-            num = int(re.sub(r"\D", "", match.group(1)))
-            if match.group(2):
+        # 4. Vendas
+        texto_pagina = soup.get_text()
+        match_vendas = re.search(r"(\+?\d+)\s*(mil)?\s*vendidos?", texto_pagina, re.IGNORECASE)
+        if match_vendas:
+            num = int(re.sub(r"\D", "", match_vendas.group(1)))
+            if match_vendas.group(2):
                 num *= 1000
             dados["vendas"] = num
 
-        # Descrição
-        desc = soup.find("p", class_=lambda c: c and "description" in c)
-        if desc:
-            dados["descricao"] = desc.get_text(strip=True)
-
     except Exception as e:
-        print(f"Erro ao capturar dados: {e}")
+        print(f"Erro ao capturar dados do Mercado Livre: {e}")
 
     return dados
 
-# Rota para o botão "Puxar Dados Automático" (responde às chamadas AJAX do painel)
-@app.route("/buscar-dados", methods=["POST", "GET"])
-@app.route("/api/buscar-dados", methods=["POST", "GET"])
-@app.route("/api/buscar", methods=["POST", "GET"])
-def api_buscar():
+# Atende todas as possíveis rotas chamadas pelo JavaScript do botão
+@app.route("/buscar-dados", methods=["GET", "POST"])
+@app.route("/api/buscar-dados", methods=["GET", "POST"])
+@app.route("/api/buscar", methods=["GET", "POST"])
+def rota_buscar():
     url = request.args.get("url") or (request.json.get("url") if request.is_json else None) or request.form.get("url")
     if not url:
-        return jsonify({"erro": "URL não fornecida"}), 400
-    
+        return jsonify({"erro": "URL não enviada"}), 400
+
     dados = buscar_dados_mercadolivre(url)
+    if not dados["titulo"] and not dados["preco"]:
+        return jsonify({"erro": "Não foi possível extrair dados automaticamente deste link"}), 422
+
     return jsonify(dados)
 
 @app.route("/")
@@ -168,13 +179,6 @@ def index():
     produtos_formatados = []
     for p in produtos:
         item = dict(p)
-        if item.get("especificacoes"):
-            try:
-                item["especificacoes"] = json.loads(item["especificacoes"])
-            except:
-                item["especificacoes"] = {}
-        else:
-            item["especificacoes"] = {}
         produtos_formatados.append(item)
 
     return render_template(
@@ -220,13 +224,12 @@ def admin():
         vendas = request.form.get("vendas")
         descricao = request.form.get("descricao", "").strip()
 
-        # Se não foram preenchidos manualmente pelo botão automático, busca agora
+        # Caso o botão automático não tenha sido usado, tenta extrair agora
         if not (titulo and preco and imagem_url):
             dados = buscar_dados_mercadolivre(link_produto)
             titulo = titulo or dados["titulo"] or "Produto Recomendado"
             preco = preco or dados["preco"] or "0,00"
             imagem_url = imagem_url or dados["imagem_url"]
-            descricao = descricao or dados["descricao"]
             vendas = int(vendas) if vendas and vendas.isdigit() else dados["vendas"]
         else:
             vendas = int(vendas) if vendas and vendas.isdigit() else 0
