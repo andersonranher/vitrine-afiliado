@@ -15,19 +15,25 @@
     </div>
 
     <form method="POST" enctype="multipart/form-data" class="space-y-4">
+      <input type="hidden" name="imagem_atual" value="{{ p.imagem_url }}">
+
       <div>
         <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Título do Produto</label>
         <input type="text" name="titulo" value="{{ p.titulo }}" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-medium">
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
-          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Preço com Centavos (R$)</label>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Preço Final (R$)</label>
           <input type="text" name="preco" value="{{ p.preco }}" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-bold text-green-700">
         </div>
         <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Preço Anterior (R$)</label>
+          <input type="text" name="preco_original" value="{{ p.preco_original or '' }}" placeholder="Ex: 250,00" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white text-gray-500">
+        </div>
+        <div>
           <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Desconto</label>
-          <input type="text" name="desconto" value="{{ p.desconto or '' }}" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white">
+          <input type="text" name="desconto" value="{{ p.desconto or '' }}" class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-semibold text-green-600">
         </div>
         <div>
           <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Categoria</label>
@@ -60,16 +66,18 @@
         <input type="url" name="link_afiliado" value="{{ p.link_afiliado }}" required class="w-full border p-2.5 rounded-lg bg-gray-50 focus:bg-white font-mono text-xs text-blue-700">
       </div>
 
-      <div class="border rounded-lg p-4 bg-gray-50 space-y-3">
-        <span class="block text-xs font-bold text-gray-700 uppercase">Alterar Foto:</span>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs text-gray-600 mb-1">URL da Imagem</label>
-            <input type="url" name="imagem_url" value="{{ p.imagem_url }}" class="w-full border p-2 rounded bg-white text-xs">
+      <div class="border rounded-xl p-4 bg-gray-50 space-y-3">
+        <span class="block text-xs font-bold text-gray-700 uppercase">Imagem do Produto:</span>
+        <div class="flex items-center gap-4">
+          <div class="w-16 h-16 bg-white border rounded-lg p-1 flex items-center justify-center shrink-0">
+            <img src="{{ p.imagem_url }}" alt="" referrerpolicy="no-referrer" class="max-h-full max-w-full object-contain">
           </div>
-          <div>
-            <label class="block text-xs text-gray-600 mb-1">Ou Upload de Novo Ficheiro</label>
-            <input type="file" name="imagem_upload" accept="image/*" class="w-full text-xs text-gray-500 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700 file:font-semibold">
+          <div class="flex-1 space-y-2">
+            <p class="text-xs text-gray-500 font-semibold">Imagem salva atualmente. Deixe os campos abaixo em branco se não desejar alterar:</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <input type="url" name="imagem_url" placeholder="Nova URL (opcional)" class="w-full border p-2 rounded bg-white text-xs">
+              <input type="file" name="imagem_upload" accept="image/*" class="w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700">
+            </div>
           </div>
         </div>
       </div>
