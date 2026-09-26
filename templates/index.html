@@ -20,24 +20,47 @@
     </div>
   </header>
 
-  <div class="max-w-7xl mx-auto px-4 mt-6">
+  <div class="max-w-7xl mx-auto px-4 mt-6 space-y-3">
+    <!-- Filtro de Categorias -->
     <div class="flex flex-wrap gap-2 items-center">
-      <span class="text-xs font-bold text-gray-500 uppercase mr-1">Filtrar:</span>
-      <a href="/" class="text-xs font-semibold px-3 py-1.5 rounded-full border {% if not categoria_ativa %}bg-blue-600 text-white border-blue-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-100{% endif %}">
+      <span class="text-xs font-bold text-gray-500 uppercase mr-1">Categorias:</span>
+      <a href="/" class="text-xs font-semibold px-3 py-1.5 rounded-full border {% if not categoria_ativa and not marca_ativa %}bg-blue-600 text-white border-blue-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-100{% endif %}">
         Todos
       </a>
       {% for cat in categorias %}
-      <a href="/?categoria={{ cat }}" class="text-xs font-semibold px-3 py-1.5 rounded-full border {% if categoria_ativa == cat %}bg-blue-600 text-white border-blue-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-100{% endif %}">
+      <a href="/?categoria={{ cat }}{% if marca_ativa %}&marca={{ marca_ativa }}{% endif %}" class="text-xs font-semibold px-3 py-1.5 rounded-full border {% if categoria_ativa == cat %}bg-blue-600 text-white border-blue-600{% else %}bg-white text-gray-700 border-gray-300 hover:bg-gray-100{% endif %}">
         {{ cat }}
       </a>
       {% endfor %}
     </div>
+
+    <!-- Barra de Filtro de Marcas -->
+    {% if marcas %}
+    <div class="flex flex-wrap gap-2 items-center bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+      <span class="text-xs font-bold text-gray-800 uppercase flex items-center gap-1 mr-1">
+        🏷️ Marcas:
+      </span>
+      {% for m in marcas %}
+      <a href="/?marca={{ m }}{% if categoria_ativa %}&categoria={{ categoria_ativa }}{% endif %}" class="text-xs font-medium px-3 py-1 rounded-lg border transition {% if marca_ativa == m %}bg-gray-900 text-white border-gray-900 font-bold{% else %}bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100{% endif %}">
+        {{ m }}
+      </a>
+      {% endfor %}
+      {% if marca_ativa %}
+      <a href="/{% if categoria_ativa %}?categoria={{ categoria_ativa }}{% endif %}" class="text-xs text-red-500 hover:underline font-semibold ml-2">
+        &times; Limpar Marca
+      </a>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 
   <main class="max-w-7xl mx-auto px-4 py-8">
     {% if not produtos %}
     <div class="text-center py-16 text-gray-400">
-      <p class="text-lg">Nenhum produto cadastrado ainda.</p>
+      <p class="text-lg">Nenhum produto cadastrado com esses filtros.</p>
+      {% if categoria_ativa or marca_ativa %}
+      <a href="/" class="text-blue-600 font-bold text-sm hover:underline mt-2 inline-block">Ver todos os produtos</a>
+      {% endif %}
     </div>
     {% else %}
     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6" id="grid_produtos">
@@ -69,7 +92,7 @@
 
             {% if p.marca or p.modelo %}
             <p class="text-[11px] text-gray-500 font-medium">
-              {% if p.marca %}Marca: <b>{{ p.marca }}</b>{% endif %}
+              {% if p.marca %}Marca: <b class="text-gray-700">{{ p.marca }}</b>{% endif %}
               {% if p.modelo %} | Modelo: <b>{{ p.modelo }}</b>{% endif %}
             </p>
             {% endif %}
