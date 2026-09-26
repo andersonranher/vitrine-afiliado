@@ -67,9 +67,8 @@ def buscar_dados_mercadolivre(url):
     dados = {
         "titulo": "",
         "preco": "",
+        "categoria": "Geral",
         "imagem_url": "",
-        "vendas": 0,
-        "descricao": "",
         "especificacoes": {}
     }
 
@@ -82,10 +81,7 @@ def buscar_dados_mercadolivre(url):
 
     try:
         session = requests.Session()
-        # Se for link do encurtador meli.la, resolve o redirecionamento
         res = session.get(url, headers=headers, allow_redirects=True, timeout=12)
-        url_final = res.url
-        
         soup = BeautifulSoup(res.content, "html.parser")
 
         # 1. Título
@@ -118,34 +114,26 @@ def buscar_dados_mercadolivre(url):
             if meta_price and meta_price.get("content"):
                 dados["preco"] = meta_price["content"].replace(".", ",")
 
-        # 4. Vendas
-        texto_pagina = soup.get_text()
-        match_vendas = re.search(r"(\+?\d+)\s*(mil)?\s*vendidos?", texto_pagina, re.IGNORECASE)
-        if match_vendas:
-            num = int(re.sub(r"\D", "", match_vendas.group(1)))
-            if match_vendas.group(2):
-                num *= 1000
-            dados["vendas"] = num
+        # 4. Categoria
+        breadcrumb = soup.find_all("a", class_=lambda c: c and "breadcrumb" in c)
+        if breadcrumb and len(breadcrumb) > 1:
+            dados["categoria"] = breadcrumb[-1].get_text(strip=True)
 
     except Exception as e:
-        print(f"Erro ao capturar dados do Mercado Livre: {e}")
+        print(f"Erro ao extrair dados do link: {e}")
 
     return dados
 
-# Atende todas as possíveis rotas chamadas pelo JavaScript do botão
-@app.route("/buscar-dados", methods=["GET", "POST"])
-@app.route("/api/buscar-dados", methods=["GET", "POST"])
-@app.route("/api/buscar", methods=["GET", "POST"])
-def rota_buscar():
-    url = request.args.get("url") or (request.json.get("url") if request.is_json else None) or request.form.get("url")
+# ROTA EXATA QUE O admin.html CHAMA NO JAVASCRIPT:
+@app.route("/api/extrair-dados", methods=["POST"])
+def rota_extrair_dados():
+    data = request.get_json() or {}
+    url = data.get("url", "").strip()
     if not url:
-        return jsonify({"erro": "URL não enviada"}), 400
+        return jsonify({"erro": "URL vazia"}), 400
 
     dados = buscar_dados_mercadolivre(url)
-    if not dados["titulo"] and not dados["preco"]:
-        return jsonify({"erro": "Não foi possível extrair dados automaticamente deste link"}), 422
-
-    return jsonify(dados)
+    return jsonify(dados), 200
 
 @app.route("/")
 def index():
@@ -209,66 +197,61 @@ def comprar(produto_id):
 
 @app.route("/admin", methods=["GET", "POST"])
 def admin():
+    conn, is_pg = get_db_connection()
+    cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
+
     if request.method == "POST":
         link_afiliado = request.form.get("link_afiliado", "").strip()
-        link_produto = request.form.get("link_produto", "").strip() or link_afiliado
-        categoria = request.form.get("categoria", "").strip() or "Geral"
-
-        if not link_afiliado:
-            flash("Informe o link de afiliado!", "error")
-            return redirect(url_for("admin"))
-
         titulo = request.form.get("titulo", "").strip()
         preco = request.form.get("preco", "").strip()
+        categoria = request.form.get("categoria", "").strip() or "Geral"
         imagem_url = request.form.get("imagem_url", "").strip()
-        vendas = request.form.get("vendas")
         descricao = request.form.get("descricao", "").strip()
-
-        # Caso o botão automático não tenha sido usado, tenta extrair agora
-        if not (titulo and preco and imagem_url):
-            dados = buscar_dados_mercadolivre(link_produto)
-            titulo = titulo or dados["titulo"] or "Produto Recomendado"
-            preco = preco or dados["preco"] or "0,00"
-            imagem_url = imagem_url or dados["imagem_url"]
-            vendas = int(vendas) if vendas and vendas.isdigit() else dados["vendas"]
-        else:
-            vendas = int(vendas) if vendas and vendas.isdigit() else 0
-
-        conn, is_pg = get_db_connection()
-        cursor = conn.cursor()
+        especificacoes = request.form.get("especificacoes", "{}")
 
         if is_pg:
             cursor.execute("""
                 INSERT INTO produtos (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
-            """, (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, json.dumps({})))
+            """, (titulo, preco, imagem_url, link_afiliado, categoria, 0, descricao, especificacoes))
         else:
             cursor.execute("""
                 INSERT INTO produtos (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, especificacoes)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-            """, (titulo, preco, imagem_url, link_afiliado, categoria, vendas, descricao, json.dumps({})))
+            """, (titulo, preco, imagem_url, link_afiliado, categoria, 0, descricao, especificacoes))
 
         conn.commit()
         cursor.close()
         conn.close()
-
-        flash("Produto cadastrado com sucesso!", "success")
         return redirect(url_for("admin"))
 
-    conn, is_pg = get_db_connection()
     if is_pg:
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute("SELECT * FROM produtos ORDER BY id DESC;")
         produtos = cursor.fetchall()
     else:
-        cursor = conn.cursor()
         cursor.execute("SELECT * FROM produtos ORDER BY id DESC;")
         produtos = cursor.fetchall()
         
     cursor.close()
     conn.close()
-
     return render_template("admin.html", produtos=produtos)
+
+@app.route("/admin/excluir/<int:produto_id>", methods=["POST"])
+def excluir_produto(produto_id):
+    conn, is_pg = get_db_connection()
+    cursor = conn.cursor()
+    if is_pg:
+        cursor.execute("DELETE FROM produtos WHERE id = %s;", (produto_id,))
+    else:
+        cursor.execute("DELETE FROM produtos WHERE id = ?;", (produto_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(url_for("admin"))
+
+@app.route("/admin/atualizar-precos", methods=["POST"])
+def atualizar_precos():
+    return redirect(url_for("admin"))
 
 if __name__ == "__main__":
     app.run(debug=True)
