@@ -23,7 +23,7 @@ def obter_vendas_ml(url):
             elemento_vendas = sopa.find("span", class_="ui-pdp-subtitle")
             if elemento_vendas:
                 texto = elemento_vendas.get_text()
-                # Exemplo de texto capturado: "Novo  |  +1000 vendidos"
+                # Exemplo: "Novo  |  +1000 vendidos"
                 numeros = re.findall(r"\d+", texto.replace(".", ""))
                 if numeros:
                     return int(numeros[-1])
@@ -157,15 +157,18 @@ def capturar_preco_ml(url_afiliado):
     return None
 
 def sincronizar_todos_os_precos():
-    print("[ROBÔ] Atualizando preços...")
+    print("[ROBÔ] Atualizando preços e vendas...")
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id, link_afiliado, preco, titulo FROM produtos")
         for item_id, link, preco_velho, titulo in cursor.fetchall():
             novo_preco = capturar_preco_ml(link)
+            novas_vendas = obter_vendas_ml(link)
             if novo_preco and novo_preco != preco_velho:
-                cursor.execute("UPDATE produtos SET preco = ? WHERE id = ?", (novo_preco, item_id))
-                print(f"[ATUALIZADO] {titulo[:25]} -> R$ {novo_preco}")
+                cursor.execute("UPDATE produtos SET preco = ?, vendas = ? WHERE id = ?", (novo_preco, novas_vendas, item_id))
+                print(f"[ATUALIZADO] {titulo[:25]} -> R$ {novo_preco} | {novas_vendas} vendas")
+            elif novas_vendas:
+                cursor.execute("UPDATE produtos SET vendas = ? WHERE id = ?", (novas_vendas, item_id))
             time.sleep(1)
         conn.commit()
 
@@ -189,9 +192,15 @@ def init_db():
                 categoria TEXT,
                 especificacoes TEXT,
                 link_afiliado TEXT NOT NULL,
-                cliques INTEGER DEFAULT 0
+                cliques INTEGER DEFAULT 0,
+                vendas INTEGER DEFAULT 0
             )
         """)
+        # Garante que a coluna vendas exista mesmo se a tabela já tiver sido criada antes
+        try:
+            cursor.execute("ALTER TABLE produtos ADD COLUMN vendas INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 init_db()
@@ -260,12 +269,15 @@ def admin():
         link_afiliado = request.form['link_afiliado']
         imagem_final = processar_imagem(request.files, request.form)
 
+        # Captura automaticamente as vendas do link informado
+        vendas = obter_vendas_ml(link_afiliado)
+
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO produtos (titulo, descricao, preco, imagem_url, categoria, especificacoes, link_afiliado)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (titulo, descricao, preco, imagem_final, categoria, especificacoes, link_afiliado))
+                INSERT INTO produtos (titulo, descricao, preco, imagem_url, categoria, especificacoes, link_afiliado, vendas)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (titulo, descricao, preco, imagem_final, categoria, especificacoes, link_afiliado, vendas))
             conn.commit()
 
         return redirect(url_for('admin'))
@@ -298,13 +310,16 @@ def editar_produto(produto_id):
         link_afiliado = request.form['link_afiliado']
         imagem_final = processar_imagem(request.files, request.form, produto['imagem_url'])
 
+        # Atualiza a contagem de vendas na edição
+        vendas = obter_vendas_ml(link_afiliado)
+
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE produtos 
-                SET titulo = ?, descricao = ?, preco = ?, imagem_url = ?, categoria = ?, link_afiliado = ?
+                SET titulo = ?, descricao = ?, preco = ?, imagem_url = ?, categoria = ?, link_afiliado = ?, vendas = ?
                 WHERE id = ?
-            """, (titulo, descricao, preco, imagem_final, categoria, link_afiliado, produto_id))
+            """, (titulo, descricao, preco, imagem_final, categoria, link_afiliado, vendas, produto_id))
             conn.commit()
 
         return redirect(url_for('admin'))
