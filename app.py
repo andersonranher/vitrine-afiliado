@@ -199,7 +199,7 @@ def extrair_dados_ml(url_afiliado):
         if parcelas:
             dados["pagamento"] = parcelas.get_text(" ", strip=True)
 
-        # 6. Quantidade de Vendas (Robusto para pegar +500 vendidos)
+        # 6. Quantidade de Vendas
         sub = soup.find(class_=lambda c: c and ("subtitle" in c or "header__subtitle" in c))
         if sub and "vendido" in sub.get_text().lower():
             partes = sub.get_text(strip=True).split("|")
@@ -218,27 +218,29 @@ def extrair_dados_ml(url_afiliado):
         if crumbs and len(crumbs) > 1:
             dados["categoria"] = crumbs[-1].get_text(strip=True)
 
-        # 8. Marca e Modelo
-        tabelas = soup.find_all(["table", "div"], class_=lambda c: c and "specs" in c) or soup.find_all("table")
-        for tabela in tabelas:
-            for tr in tabela.find_all("tr"):
-                th = tr.find(["th", "span", "div"], class_=lambda c: c and ("label" in c or "header" in c or "title" in c)) or tr.find("th")
-                td = tr.find(["td", "span", "div"], class_=lambda c: c and "value" in c) or tr.find("td")
-                if th and td:
-                    rotulo = th.get_text(strip=True).lower()
-                    conteudo = td.get_text(strip=True)
-                    if "marca" in rotulo and not dados["marca"]:
-                        dados["marca"] = conteudo
-                    elif "modelo" in rotulo and not dados["modelo"]:
-                        dados["modelo"] = conteudo
+        # 8. Extração Especial de Marca e Modelo ("Características do produto")
+        for tr in soup.find_all("tr"):
+            th = tr.find(["th", "td", "span"], class_=lambda c: c and ("label" in c or "header" in c or "title" in c or "key" in c)) or tr.find("th")
+            td = tr.find(["td", "span", "div"], class_=lambda c: c and ("value" in c or "text" in c)) or (tr.find_all("td")[-1] if tr.find_all("td") else None)
+            
+            if th and td and th != td:
+                rotulo = th.get_text(strip=True).lower()
+                conteudo = td.get_text(strip=True)
+                
+                if (rotulo == "marca" or rotulo.startswith("marca")) and not dados["marca"]:
+                    dados["marca"] = conteudo
+                elif (rotulo == "modelo" or rotulo.startswith("modelo")) and not dados["modelo"]:
+                    dados["modelo"] = conteudo
 
         if not dados["marca"] or not dados["modelo"]:
-            for item in soup.find_all(class_=lambda c: c and "item-property" in c):
-                t_item = item.get_text(strip=True).lower()
-                if "marca:" in t_item and not dados["marca"]:
-                    dados["marca"] = t_item.split("marca:")[-1].strip()
-                elif "modelo:" in t_item and not dados["modelo"]:
-                    dados["modelo"] = t_item.split("modelo:")[-1].strip()
+            for item in soup.find_all(class_=lambda c: c and ("specs" in c or "attribute" in c or "item-property" in c)):
+                texto_item = item.get_text(" ", strip=True)
+                m_marca = re.search(r"Marca\s*:\s*([^,\n|]+)", texto_item, re.IGNORECASE)
+                m_modelo = re.search(r"Modelo\s*:\s*([^,\n|]+)", texto_item, re.IGNORECASE)
+                if m_marca and not dados["marca"]:
+                    dados["marca"] = m_marca.group(1).strip()
+                if m_modelo and not dados["modelo"]:
+                    dados["modelo"] = m_modelo.group(1).strip()
 
     except Exception as e:
         print(f"Erro no scraper: {e}")
@@ -257,21 +259,32 @@ def api_extrair_dados():
 @app.route("/")
 def index():
     categoria = request.args.get("categoria")
+    marca = request.args.get("marca")
+    
     conn, is_pg = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
 
+    query = "SELECT * FROM produtos WHERE 1=1"
+    params = []
+
     if categoria:
-        if is_pg:
-            cursor.execute("SELECT * FROM produtos WHERE categoria = %s ORDER BY id DESC;", (categoria,))
-        else:
-            cursor.execute("SELECT * FROM produtos WHERE categoria = ? ORDER BY id DESC;", (categoria,))
-    else:
-        cursor.execute("SELECT * FROM produtos ORDER BY id DESC;")
+        query += " AND categoria = %s" if is_pg else " AND categoria = ?"
+        params.append(categoria)
+    if marca:
+        query += " AND marca = %s" if is_pg else " AND marca = ?"
+        params.append(marca)
+
+    query += " ORDER BY id DESC;"
+    cursor.execute(query, tuple(params))
     produtos = [dict(p) for p in cursor.fetchall()]
 
-    cursor.execute("SELECT DISTINCT categoria FROM produtos WHERE categoria IS NOT NULL AND categoria != '';")
+    cursor.execute("SELECT DISTINCT categoria FROM produtos WHERE categoria IS NOT NULL AND TRIM(categoria) != '' ORDER BY categoria ASC;")
     cat_rows = cursor.fetchall()
     categorias = [c["categoria"] if isinstance(c, dict) else c[0] for c in cat_rows]
+
+    cursor.execute("SELECT DISTINCT marca FROM produtos WHERE marca IS NOT NULL AND TRIM(marca) != '' ORDER BY marca ASC;")
+    marca_rows = cursor.fetchall()
+    marcas = [m["marca"] if isinstance(m, dict) else m[0] for m in marca_rows]
 
     cursor.close()
     conn.close()
@@ -280,7 +293,9 @@ def index():
         "index.html",
         produtos=produtos,
         categorias=categorias,
-        categoria_ativa=categoria
+        marcas=marcas,
+        categoria_ativa=categoria,
+        marca_ativa=marca
     )
 
 @app.route("/comprar/<int:produto_id>")
@@ -445,31 +460,35 @@ def sincronizar_precos_background():
     cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
     
     try:
-        cursor.execute("SELECT id, link_afiliado, vendas FROM produtos;")
+        cursor.execute("SELECT id, link_afiliado, vendas, marca, modelo FROM produtos;")
         produtos = [dict(p) for p in cursor.fetchall()]
 
         for prod in produtos:
             link = prod.get("link_afiliado")
             vendas_existente = prod.get("vendas") or ""
+            marca_existente = prod.get("marca") or ""
+            modelo_existente = prod.get("modelo") or ""
+            
             if link:
                 try:
                     novos = extrair_dados_ml(link)
                     if novos.get("preco") and novos["preco"] != "0,00":
-                        # PROTEÇÃO: Só substitui vendas se o scraper tiver capturado uma nova string; senão preserva a existente!
                         vendas_final = str(novos["vendas"]) if novos.get("vendas") else vendas_existente
+                        marca_final = novos["marca"] if novos.get("marca") else marca_existente
+                        modelo_final = novos["modelo"] if novos.get("modelo") else modelo_existente
 
                         if is_pg:
                             cursor.execute("""
                                 UPDATE produtos 
-                                SET preco=%s, preco_original=%s, desconto=%s, pagamento=%s, vendas=%s
+                                SET preco=%s, preco_original=%s, desconto=%s, pagamento=%s, vendas=%s, marca=%s, modelo=%s
                                 WHERE id=%s;
-                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], vendas_final, prod["id"]))
+                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], vendas_final, marca_final, modelo_final, prod["id"]))
                         else:
                             cursor.execute("""
                                 UPDATE produtos 
-                                SET preco=?, preco_original=?, desconto=?, pagamento=?, vendas=?
+                                SET preco=?, preco_original=?, desconto=?, pagamento=?, vendas=?, marca=?, modelo=?
                                 WHERE id=?;
-                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], vendas_final, prod["id"]))
+                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], vendas_final, marca_final, modelo_final, prod["id"]))
                         conn.commit()
                 except Exception as item_err:
                     conn.rollback()
