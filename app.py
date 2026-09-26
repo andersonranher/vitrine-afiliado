@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import threading
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
@@ -59,11 +60,29 @@ def init_db():
         """)
         conn.commit()
 
+        # Ajuste de tipos e colunas adicionais para bancos existentes
         try:
-            cursor.execute("ALTER TABLE produtos ADD COLUMN preco_original TEXT DEFAULT '';")
+            cursor.execute("ALTER TABLE produtos ALTER COLUMN vendas TYPE TEXT USING vendas::TEXT;")
             conn.commit()
         except Exception:
             conn.rollback()
+
+        colunas = [
+            ("preco_original", "TEXT DEFAULT ''"),
+            ("desconto", "TEXT DEFAULT ''"),
+            ("pagamento", "TEXT DEFAULT ''"),
+            ("marca", "TEXT DEFAULT ''"),
+            ("modelo", "TEXT DEFAULT ''"),
+            ("vendas", "TEXT DEFAULT ''"),
+            ("descricao", "TEXT DEFAULT ''"),
+            ("especificacoes", "TEXT DEFAULT '{}'")
+        ]
+        for col, tipo in colunas:
+            try:
+                cursor.execute(f"ALTER TABLE produtos ADD COLUMN {col} {tipo};")
+                conn.commit()
+            except Exception:
+                conn.rollback()
     else:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS produtos (
@@ -119,7 +138,7 @@ def extrair_dados_ml(url_afiliado):
 
     try:
         session = requests.Session()
-        res = session.get(url_afiliado, headers=headers, allow_redirects=True, timeout=15)
+        res = session.get(url_afiliado, headers=headers, allow_redirects=True, timeout=12)
         soup = BeautifulSoup(res.content, "html.parser")
 
         # 1. Título
@@ -147,7 +166,7 @@ def extrair_dados_ml(url_afiliado):
         if disc:
             dados["desconto"] = disc.get_text(strip=True)
 
-        # 4. Preço Atual com Desconto vs. Preço Original (riscado)
+        # 4. Preço Atual com Desconto e Preço Original
         precos_encontrados = []
         for money_span in soup.find_all("span", class_=lambda c: c and "andes-money-amount" in c):
             if "installment" in str(money_span.get("class", [])):
@@ -350,7 +369,7 @@ def editar_produto(produto_id):
         modelo = request.form.get("modelo", "").strip()
         vendas = request.form.get("vendas", "").strip()
 
-        # Mantém a imagem atual se nenhuma nova for enviada
+        # Mantém a imagem atual caso o usuário não envie uma nova
         imagem_atual = request.form.get("imagem_atual", "").strip()
         imagem_url = request.form.get("imagem_url", "").strip()
         
@@ -413,38 +432,51 @@ def excluir_produto(produto_id):
         conn.close()
     return redirect(url_for("admin"))
 
-@app.route("/admin/atualizar-precos", methods=["POST"])
-def atualizar_precos():
+# Função executada em segundo plano para não dar timeout (502) no Render
+def sincronizar_precos_background():
     conn, is_pg = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor) if is_pg else conn.cursor()
     
-    cursor.execute("SELECT id, link_afiliado FROM produtos;")
-    produtos = [dict(p) for p in cursor.fetchall()]
+    try:
+        cursor.execute("SELECT id, link_afiliado FROM produtos;")
+        produtos = [dict(p) for p in cursor.fetchall()]
 
-    for prod in produtos:
-        if prod.get("link_afiliado"):
-            try:
-                novos = extrair_dados_ml(prod["link_afiliado"])
-                if novos.get("preco") and novos["preco"] != "0,00":
-                    if is_pg:
-                        cursor.execute("""
-                            UPDATE produtos 
-                            SET preco=%s, preco_original=%s, desconto=%s, pagamento=%s, vendas=%s
-                            WHERE id=%s;
-                        """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
-                    else:
-                        cursor.execute("""
-                            UPDATE produtos 
-                            SET preco=?, preco_original=?, desconto=?, pagamento=?, vendas=?
-                            WHERE id=?;
-                        """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
-                    conn.commit()
-            except Exception as inner_err:
-                conn.rollback()
-                print(f"Erro item #{prod['id']}: {inner_err}")
+        for prod in produtos:
+            link = prod.get("link_afiliado")
+            if link:
+                try:
+                    novos = extrair_dados_ml(link)
+                    if novos.get("preco") and novos["preco"] != "0,00":
+                        if is_pg:
+                            cursor.execute("""
+                                UPDATE produtos 
+                                SET preco=%s, preco_original=%s, desconto=%s, pagamento=%s, vendas=%s
+                                WHERE id=%s;
+                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
+                        else:
+                            cursor.execute("""
+                                UPDATE produtos 
+                                SET preco=?, preco_original=?, desconto=?, pagamento=?, vendas=?
+                                WHERE id=?;
+                            """, (novos["preco"], novos["preco_original"], novos["desconto"], novos["pagamento"], str(novos["vendas"]), prod["id"]))
+                        conn.commit()
+                except Exception as item_err:
+                    conn.rollback()
+                    print(f"Erro item #{prod['id']}: {item_err}")
+    except Exception as e:
+        print("Erro na sincronização em background:", e)
+    finally:
+        cursor.close()
+        conn.close()
 
-    cursor.close()
-    conn.close()
+@app.route("/admin/atualizar-precos", methods=["POST"])
+def atualizar_precos():
+    # Inicia a sincronização numa thread separada
+    t = threading.Thread(target=sincronizar_precos_background)
+    t.daemon = True
+    t.start()
+    
+    # Redireciona na mesma hora evitando que o Render exceda os 30s de timeout
     return redirect(url_for("admin"))
 
 if __name__ == "__main__":
